@@ -22,16 +22,14 @@ const Statistics = () => {
   const bestStreak = getBestStreak();
   const totalCheckIns = getTotalCheckIns();
 
-  const thirtyDayRate = useMemo(() => {
+  const completionRate = useMemo(() => {
     const entries = getAllEntries();
+    if (entries.length === 0) return 0;
+    const dates = entries.map(e => new Date(e.date).getTime());
+    const firstDate = new Date(Math.min(...dates));
     const today = new Date();
-    let count = 0;
-    for (let i = 0; i < 30; i++) {
-      const d = new Date(today);
-      d.setDate(d.getDate() - i);
-      if (entries.find(e => e.date === d.toISOString().split('T')[0])) count++;
-    }
-    return Math.round((count / 30) * 100);
+    const totalDays = Math.max(1, Math.floor((today.getTime() - firstDate.getTime()) / (1000 * 60 * 60 * 24)) + 1);
+    return Math.round((entries.length / totalDays) * 100);
   }, []);
 
   const weeklyInsight = useMemo(() => {
@@ -139,8 +137,8 @@ const Statistics = () => {
           <div className="w-9 h-9 rounded-xl bg-success/15 flex items-center justify-center mx-auto mb-2">
             <Percent className="w-4.5 h-4.5 text-success" />
           </div>
-          <p className="text-xl font-bold text-foreground">{thirtyDayRate}%</p>
-          <p className="text-[10px] text-muted-foreground mt-0.5">{t('thirtyDayRate')}</p>
+          <p className="text-xl font-bold text-foreground">{completionRate}%</p>
+          <p className="text-[10px] text-muted-foreground mt-0.5">{t('completionRate')}</p>
         </div>
       </div>
 
