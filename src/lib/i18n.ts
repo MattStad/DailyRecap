@@ -122,6 +122,12 @@ const translations = {
     'noData': 'Noch keine Daten',
     'topWords': 'Häufigste Wörter',
     'recentEntries': 'Letzte Einträge',
+    'heatmap.title': 'Aktivitäts-Übersicht',
+    'heatmap.less': 'Weniger',
+    'heatmap.more': 'Mehr',
+    'heatmap.dayScore': 'Tages-Score',
+    'heatmap.questionsOf': '{n} von {total} Fragen',
+    'heatmap.noData': 'Kein Eintrag',
 
     // Settings
     'settings': 'Einstellungen',
@@ -288,6 +294,12 @@ const translations = {
     'noData': 'No data yet',
     'topWords': 'Most frequent words',
     'recentEntries': 'Recent entries',
+    'heatmap.title': 'Activity Overview',
+    'heatmap.less': 'Less',
+    'heatmap.more': 'More',
+    'heatmap.dayScore': 'Day Score',
+    'heatmap.questionsOf': '{n} of {total} questions',
+    'heatmap.noData': 'No entry',
 
     'settings': 'Settings',
     'settings.subtitle': 'Customize app',

@@ -1,11 +1,11 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Flame, CalendarCheck, Trophy, Percent, TrendingUp, TrendingDown, Lightbulb, BarChart3, LineChart as LineChartIcon } from 'lucide-react';
+import { ArrowLeft, Flame, CalendarCheck, Trophy, Percent, TrendingUp, TrendingDown, Lightbulb, BarChart3, LineChart as LineChartIcon, X } from 'lucide-react';
 import { Question, PREDEFINED_QUESTIONS } from '@/lib/questions';
 import { useI18n } from '@/lib/i18n';
 import {
   getUserQuestions, getCustomQuestions, getAnswersForQuestion, updateQuestionChartType,
-  getStreak, getBestStreak, getTotalCheckIns, getAllEntries,
+  getStreak, getBestStreak, getTotalCheckIns, getAllEntries, getDayEntry,
 } from '@/lib/store';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -16,6 +16,7 @@ const Statistics = () => {
   const navigate = useNavigate();
   const { t, tQuestion, dateLocale } = useI18n();
   const [userQuestions, setUserQuestions] = useState(getUserQuestions());
+  const [selectedHeatmapDay, setSelectedHeatmapDay] = useState<string | null>(null);
   const allQuestions = useMemo(() => [...PREDEFINED_QUESTIONS, ...getCustomQuestions()], []);
 
   const streak = getStreak();
@@ -163,6 +164,18 @@ const Statistics = () => {
           </div>
         </div>
       )}
+      {/* Heatmap */}
+      <div className="px-5 mb-4">
+        <HeatmapCalendar
+          t={t}
+          tQuestion={tQuestion}
+          dateLocale={dateLocale}
+          allQuestions={allQuestions}
+          userQuestions={userQuestions}
+          selectedDay={selectedHeatmapDay}
+          onSelectDay={setSelectedHeatmapDay}
+        />
+      </div>
 
       {/* Question trends */}
       <div className="px-5 pb-8">
@@ -341,6 +354,213 @@ function FreeTextStats({ answers, dateLocale, t }: { answers: { date: string; va
           ))}
         </div>
       </div>
+    </div>
+  );
+}
+
+function HeatmapCalendar({ t, tQuestion, dateLocale, allQuestions, userQuestions, selectedDay, onSelectDay }: {
+  t: (k: string) => string;
+  tQuestion: (id: string, text: string) => string;
+  dateLocale: string;
+  allQuestions: Question[];
+  userQuestions: any[];
+  selectedDay: string | null;
+  onSelectDay: (day: string | null) => void;
+}) {
+  const entries = useMemo(() => getAllEntries(), []);
+  const entryMap = useMemo(() => {
+    const map: Record<string, number> = {};
+    entries.forEach(e => { map[e.date] = e.answers.length; });
+    return map;
+  }, [entries]);
+
+  // Build 16 weeks (112 days) of data
+  const { weeks, months } = useMemo(() => {
+    const today = new Date();
+    const totalWeeks = 16;
+    const totalDays = totalWeeks * 7;
+    
+    // Find the Monday of the current week
+    const dayOfWeek = today.getDay();
+    const currentMonday = new Date(today);
+    currentMonday.setDate(today.getDate() - ((dayOfWeek + 6) % 7));
+    
+    // Go back totalWeeks-1 weeks
+    const startDate = new Date(currentMonday);
+    startDate.setDate(currentMonday.getDate() - (totalWeeks - 1) * 7);
+
+    const maxAnswers = Math.max(1, ...Object.values(entryMap));
+    const weeks: { dateStr: string; level: number; date: Date }[][] = [];
+    const monthLabels: { label: string; col: number }[] = [];
+    let lastMonth = -1;
+
+    for (let w = 0; w < totalWeeks; w++) {
+      const week: typeof weeks[0] = [];
+      for (let d = 0; d < 7; d++) {
+        const date = new Date(startDate);
+        date.setDate(startDate.getDate() + w * 7 + d);
+        const dateStr = date.toISOString().split('T')[0];
+        const count = entryMap[dateStr] || 0;
+        const isFuture = date > today;
+        const level = isFuture ? -1 : count === 0 ? 0 : Math.min(4, Math.ceil((count / maxAnswers) * 4));
+        week.push({ dateStr, level, date });
+
+        if (d === 0 && date.getMonth() !== lastMonth) {
+          lastMonth = date.getMonth();
+          monthLabels.push({
+            label: date.toLocaleDateString(dateLocale, { month: 'short' }),
+            col: w,
+          });
+        }
+      }
+      weeks.push(week);
+    }
+    return { weeks, months: monthLabels };
+  }, [entryMap, dateLocale]);
+
+  // Day score for selected day
+  const dayDetail = useMemo(() => {
+    if (!selectedDay) return null;
+    const entry = getDayEntry(selectedDay);
+    if (!entry || entry.answers.length === 0) return null;
+    
+    const totalUserQs = userQuestions.length || 1;
+    const answered = entry.answers.length;
+    
+    // Calculate score: for scale questions use value/max, for yesno use 1/0, skip freetext
+    let scoreSum = 0;
+    let scoreCount = 0;
+    entry.answers.forEach(a => {
+      const q = allQuestions.find(qq => qq.id === a.questionId);
+      if (!q) return;
+      if (q.type === 'scale') {
+        const max = q.scaleMax || 10;
+        const min = q.scaleMin || 1;
+        scoreSum += (Number(a.value) - min) / (max - min);
+        scoreCount++;
+      } else if (q.type === 'yesno') {
+        scoreSum += a.value === true ? 1 : 0;
+        scoreCount++;
+      }
+    });
+    const score = scoreCount > 0 ? Math.round((scoreSum / scoreCount) * 100) : null;
+
+    return {
+      answers: entry.answers.map(a => {
+        const q = allQuestions.find(qq => qq.id === a.questionId);
+        return { emoji: q?.emoji || '📝', text: q ? tQuestion(q.id, q.text) : a.questionId, value: a.value };
+      }),
+      score,
+      answered,
+      total: totalUserQs,
+    };
+  }, [selectedDay, allQuestions, userQuestions, tQuestion]);
+
+  const levelColors = [
+    'bg-secondary', // 0 - no entry
+    'bg-primary/20',
+    'bg-primary/40',
+    'bg-primary/65',
+    'bg-primary',
+  ];
+
+  return (
+    <div className="bg-card rounded-2xl shadow-card p-4">
+      <h3 className="font-semibold text-foreground mb-3">{t('heatmap.title')}</h3>
+
+      {/* Month labels */}
+      <div className="flex gap-[3px] mb-1 ml-6">
+        {weeks.map((_, wi) => {
+          const ml = months.find(m => m.col === wi);
+          return (
+            <div key={wi} className="w-3 text-center">
+              {ml && <span className="text-[9px] text-muted-foreground">{ml.label}</span>}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Heatmap grid */}
+      <div className="flex gap-0.5">
+        {/* Day labels */}
+        <div className="flex flex-col gap-[3px] mr-1 justify-start">
+          {['M', '', 'W', '', 'F', '', ''].map((d, i) => (
+            <div key={i} className="w-4 h-3 flex items-center justify-center">
+              <span className="text-[8px] text-muted-foreground">{d}</span>
+            </div>
+          ))}
+        </div>
+        
+        <div className="flex gap-[3px]">
+          {weeks.map((week, wi) => (
+            <div key={wi} className="flex flex-col gap-[3px]">
+              {week.map((day, di) => (
+                <div
+                  key={di}
+                  className={`w-3 h-3 rounded-[2px] transition-all cursor-pointer hover:ring-1 hover:ring-foreground/30 ${
+                    day.level === -1 ? 'bg-transparent' : levelColors[day.level]
+                  } ${selectedDay === day.dateStr ? 'ring-2 ring-foreground/60' : ''}`}
+                  onClick={() => {
+                    if (day.level > 0) onSelectDay(selectedDay === day.dateStr ? null : day.dateStr);
+                  }}
+                  title={`${day.dateStr}: ${entryMap[day.dateStr] || 0}`}
+                />
+              ))}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Legend */}
+      <div className="flex items-center justify-end gap-1.5 mt-2">
+        <span className="text-[9px] text-muted-foreground">{t('heatmap.less')}</span>
+        {levelColors.map((c, i) => (
+          <div key={i} className={`w-2.5 h-2.5 rounded-[2px] ${c}`} />
+        ))}
+        <span className="text-[9px] text-muted-foreground">{t('heatmap.more')}</span>
+      </div>
+
+      {/* Day detail */}
+      {selectedDay && dayDetail && (
+        <div className="mt-3 pt-3 border-t border-border/50 animate-fade-in">
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2">
+              <p className="text-sm font-semibold text-foreground">
+                {new Date(selectedDay).toLocaleDateString(dateLocale, { weekday: 'short', day: 'numeric', month: 'short' })}
+              </p>
+              {dayDetail.score !== null && (
+                <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+                  dayDetail.score >= 70 ? 'bg-primary/15 text-primary' : dayDetail.score >= 40 ? 'bg-accent/15 text-accent' : 'bg-destructive/15 text-destructive'
+                }`}>
+                  {t('heatmap.dayScore')}: {dayDetail.score}%
+                </span>
+              )}
+            </div>
+            <button onClick={() => onSelectDay(null)} className="p-1 rounded hover:bg-secondary">
+              <X className="w-3.5 h-3.5 text-muted-foreground" />
+            </button>
+          </div>
+          <p className="text-xs text-muted-foreground mb-2">
+            {(t('heatmap.questionsOf') as string).replace('{n}', String(dayDetail.answered)).replace('{total}', String(dayDetail.total))}
+          </p>
+          <div className="space-y-1">
+            {dayDetail.answers.map((a, i) => (
+              <div key={i} className="flex items-center gap-2 text-sm">
+                <span className="text-base">{a.emoji}</span>
+                <span className="text-muted-foreground flex-1 truncate text-xs">{a.text}</span>
+                <span className="font-medium text-foreground text-xs">
+                  {typeof a.value === 'boolean' ? (a.value ? '✅' : '❌') : a.value}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {selectedDay && !dayDetail && (
+        <div className="mt-3 pt-3 border-t border-border/50">
+          <p className="text-sm text-muted-foreground text-center">{t('heatmap.noData')}</p>
+        </div>
+      )}
     </div>
   );
 }
